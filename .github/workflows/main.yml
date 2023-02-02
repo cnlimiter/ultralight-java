@@ -1,0 +1,119 @@
+name: CI
+on: [ push ]
+
+jobs:
+  build-binaries-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest, ubuntu-latest ]
+
+    name: ${{ matrix.os }} build
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: Install java
+        uses: actions/setup-java@v1
+        with:
+          java-version: 8
+      - name: Build native with gradle
+        run: "./gradlew -PCI=true -Pultralight-java.base.native-binaries-folder=native-binaries/ultralight ultralight-java-native:build"
+        shell: bash
+      - name: Build gpu driver native with gradle
+        run: "./gradlew -PCI=true -Pultralight-java.base.native-binaries-folder=native-binaries/ultralight -Pultralight-java.gpu.native-binaries-folder=native-binaries/ultralight-gpu ultralight-java-gpu-native:build"
+        shell: bash
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: native-binaries-ultralight
+          path: native-binaries/ultralight
+      - name: Upload gpu artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: native-binaries-ultralight-gpu
+          path: native-binaries/ultralight-gpu
+
+  build-binaries-windows:
+    name: windows-latest build
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: Install java
+        uses: actions/setup-java@v1
+        with:
+          java-version: 8
+      - name: Build native with gradle (Windows)
+        run: "./gradlew -PCI=true -Pultralight-java.base.native-binaries-folder=native-binaries/ultralight ultralight-java-native:build"
+        shell: cmd
+      - name: Build gpu driver native with gradle (Windows)
+        run: "./gradlew -PCI=true -Pultralight-java.base.native-binaries-folder=native-binaries/ultralight -Pultralight-java.gpu.native-binaries-folder=native-binaries/ultralight-gpu ultralight-java-gpu-native:build"
+        shell: cmd
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: native-binaries-ultralight
+          path: native-binaries/ultralight
+      - name: Upload gpu artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: native-binaries-ultralight-gpu
+          path: native-binaries/ultralight-gpu
+
+  build-jars:
+    needs: [ build-binaries-unix, build-binaries-windows ]
+    runs-on: ubuntu-latest # Doesn't matter, but linux tends to be the fastest
+
+    name: Build final jars
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: Install java
+        uses: actions/setup-java@v1
+        with:
+          java-version: 8
+      - name: Download existing artifacts
+        uses: actions/download-artifact@v1
+        with:
+          name: native-binaries-ultralight
+          path: native-binaries/ultralight
+      - name: Download existing gpu artifacts
+        uses: actions/download-artifact@v1
+        with:
+          name: native-binaries-ultralight-gpu
+          path: native-binaries/ultralight-gpu
+      - name: Make gradlew executable
+        run: "chmod +x gradlew"
+      - name: Build base with gradle
+        run: "./gradlew -PCI=true -Pultralight-java.base.native-binaries-folder=native-binaries/ultralight ultralight-java-base:build"
+      - name: Build gpu driver with gradle
+        run: './gradlew -PCI=true -Pultralight-java.base.native-binaries-folder=native-binaries/ultralight -Pultralight-java.gpu.native-binaries-folder=native-binaries/ultralight-gpu ultralight-java-gpu:build'
+      - name: Build lwjgl3-opengl example with gradle
+        run: "./gradlew -PCI=true -Pultralight-java.base.native-binaries-folder=native-binaries/ultralight -Pultralight-java.gpu.native-binaries-folder=native-binaries/ultralight-gpu example:lwjgl3-opengl:build"
+      - name: Check license
+        run: "./gradlew licenseCheck"
+      - name: Deploy to OSSHR
+        if: github.ref == 'refs/heads/master'
+        run: "./gradlew -PCI=true -PenableSigning -Pultralight-java.base.native-binaries-folder=native-binaries/ultralight -Pultralight-java.gpu.native-binaries-folder=native-binaries/ultralight-gpu publish"
+        env:
+          FLINT_DISTRIBUTOR_PUBLISH_TOKEN: ${{ secrets.FLINT_DISTRIBUTOR_PUBLISH_TOKEN }}
+          FLINT_DISTRIBUTOR_URL: ${{ secrets.FLINT_DISTRIBUTOR_URL }}
+          SIGNING_KEY: ${{ secrets.signingKey }}
+          SIGNING_PASSWORD: ${{ secrets.signingPassword }}
+          OSSHR_USER: ${{ secrets.osshrUser }}
+          OSSHR_PASSWORD: ${{ secrets.osshrPassword }}
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: Final artifacts
+          path: ultralight-java-*/build/libs/*.jar
